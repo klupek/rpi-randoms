@@ -1,0 +1,19 @@
+Files:
+	bootlogd: init script, modified from raspbian wheezy (2014-06-20)
+		modifications: use our fifo as boot logfile 
+	
+	lcd-booting.py: script which writes to LCD
+		move to: /piface
+
+	lcd-booting: init script for script above
+		move to: /etc/init.d
+
+Usage:
+	mkdir /piface && mkfifo /piface/lcd-booting.input 
+	install bootlogd
+	move files as described above
+	# optional: make bootlogd init script readonly, even for root and dpkg
+	insserv bootlogd
+	insserv lcd-booting
+
+	
