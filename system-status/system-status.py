@@ -8,6 +8,7 @@ import threading
 import queue
 import subprocess
 from shutil import copyfile
+import os
 
 def init():
 	cad = pifacecad.PiFaceCAD()
@@ -111,31 +112,97 @@ def scroll_status(x, lines, cad):
 	if index > len(lines)-2: index = len(lines)-2
 	if index < 0: index = 0
 
-def scan_single_a4(cad):
-	cad.lcd.backlight_on()
+def scan_single_document(cad, msg, submsg, filename):
 	cad.lcd.clear()
-	cad.lcd.write('Scanning\n')
-	fn = strftime('%y%m%d%H%M%S')
-	cad.lcd.write(fn + '.png')
-	rc = subprocess.call('scanimage --buffer-size=40960 --mode Color --resolution 150 --compression None -l 0 -t 0 -x 210 -y 297 > /tmp/' + fn + '.pnm', shell=True)
+	cad.lcd.write(msg.ljust(16) + '\n')
+	cad.lcd.write(submsg.ljust(16))
+	rc = subprocess.call('scanimage --buffer-size=40960 --mode Color --resolution 150 --compression None -l 0 -t 0 -x 210 -y 297 > ' + filename, shell=True)
 	if rc != 0:
 		cad.lcd.set_cursor(0,0)
 		cad.lcd.write('SCAN ERROR'.ljust(15))
 		sleep(3)
+		return False
 	else:
+		return True
+
+def scan_single_a4(cad):
+	cad.lcd.backlight_on()	
+	fn = strftime('%y%m%d%H%M%S')
+
+	if scan_single_document(cad, "Scanning", fn + '.png', '/tmp/%s.pnm' % ( fn )):
 		cad.lcd.set_cursor(0,0)
 		cad.lcd.write('Convert'.ljust(15))
 		rc = subprocess.call('convert /tmp/%s.pnm /tmp/%s.png' % (fn, fn), shell=True)
+		os.unlink('/tmp/%s.pnm' % (fn))
 		if rc != 0:
 			cad.lcd.set_cursor(0,0)
 			cad.lcd.write('CONVERT ERROR'.ljust(15))
 			sleep(3)
 		else:
 			copyfile('/tmp/%s.png' % (fn), '/mnt/storage/tmp/Scanner/%s.png' % (fn))
+			os.unlink('/tmp/%s.png' % (fn))
 			cad.lcd.set_cursor(0,0)
 			cad.lcd.write('Complete'.ljust(15))
 			sleep(2)
 	cad.lcd.backlight_off()
+
+def clear_queue(eq):
+	try:
+		while not eq.empty():
+			eq.get(block=False)
+	except:
+		pass
+
+
+def scan_documents(cad, eq):
+	cad.lcd.backlight_on()
+	
+	fn = strftime('%y%m%d%H%M%S')
+	index = 1
+	keepgoing = True
+
+	while keepgoing:
+		pagefn = "%s-%d"  % (fn, index)
+		if scan_single_document(cad, "Scan page %d" % (index), pagefn, '/tmp/' + pagefn + '.pnm'):
+			cad.lcd.clear()
+			cad.lcd.write('%d pages scanned\n' % (index))
+			cad.lcd.write('Continue, stop?')
+			for event in iter(eq.get, b''):
+				if event == BTN_5:
+					keepgoing = False
+					break
+				elif event == BTN_3 or event == BTN_4:
+					index += 1
+					break
+				else: 
+					pass
+			clear_queue(eq)
+		else:
+			index -= 1
+
+	for i in range(1, index+1):
+		cad.lcd.clear()
+		cad.lcd.write('Convert %d/%d\n' % (i, index))
+		pagefn = '%s-%d' % (fn, i)
+		cad.lcd.write(pagefn)
+		
+		rc = subprocess.call('convert /tmp/%s.pnm /tmp/%s.png' % (pagefn, pagefn), shell=True)
+		os.unlink('/tmp/%s.pnm' % (pagefn))
+		if rc != 0:
+			cad.lcd.set_cursor(0,0)
+			cad.lcd.write('CONVERT ERROR'.ljust(15))
+			sleep(3)
+			return
+		else:
+			copyfile('/tmp/%s.png' % (pagefn), '/mnt/storage/tmp/Scanner/%s.png' % (pagefn))
+			os.unlink('/tmp/%s.png' % (pagefn))
+	
+	cad.lcd.clear()
+	cad.lcd.write('Complete\n')
+	cad.lcd.write('%d documents' % (index))
+	sleep(2)
+	cad.lcd.backlight_off()
+	return index
 
 def scan_autocrop(cad):
 	cad.lcd.backlight_on()
@@ -152,17 +219,18 @@ def scan_autocrop(cad):
 		cad.lcd.set_cursor(0,0)
 		cad.lcd.write('Convert + trim'.ljust(15))
 		rc = subprocess.call('convert /tmp/%s.pnm -fuzz 30%% -trim /tmp/%s.png' % (fn, fn), shell=True)
+		os.unlink('/tmp/%s.pnm' % (fn))
 		if rc != 0:
 			cad.lcd.set_cursor(0,0)
 			cad.lcd.write('CONVERT ERROR'.ljust(15))
 			sleep(3)
 		else:
 			copyfile('/tmp/%s.png' % (fn), '/mnt/storage/tmp/Scanner/%s.png' % (fn))
+			os.unlink('/tmp/%s.png' % (fn))
 			cad.lcd.set_cursor(0,0)
 			cad.lcd.write('Complete'.ljust(15))
 			sleep(2)
 	cad.lcd.backlight_off()
-
 
 while True:
 	event = None
@@ -171,7 +239,7 @@ while True:
 	except queue.Empty:
 		pass
 
-	if event != None:
+	if event is not None:
 		if event == BTN_RIGHT:
 			scroll_status(1, lines, cad)
 			print_status(index, direction,lines,cad)
@@ -180,8 +248,13 @@ while True:
 			print_status(index, direction,lines,cad)
 		elif event == BTN_1:
 			scan_single_a4(cad)
+			clear_queue(event_queue)
 		elif event == BTN_2:
 			scan_autocrop(cad)
+			clear_queue(event_queue)
+		elif event == BTN_3:
+			scan_documents(cad, event_queue)
+			clear_queue(event_queue)
 		else:
 			pass
 
