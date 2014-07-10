@@ -148,12 +148,50 @@ def scan_single_a4(event):
 				cad.lcd.set_cursor(0,0)
 				cad.lcd.write('Complete'.ljust(15))
 				sleep(2)
+		cad.lcd.backlight_off()
+		ignore_buttons = False
+
+def scan_autocrop(event):
+	global printer_lock
+	global cad
+	global listener
+	global ignore_buttons
+	global backlight_timer
+
+	if ignore_buttons: return
+	with printer_lock:
+		ignore_buttons = True
+		cad.lcd.backlight_on()
+		cad.lcd.clear()
+		cad.lcd.write('Scanning\n')
+		fn = strftime('%y%m%d%H%M%S')
+		cad.lcd.write(fn + '.png')
+		rc = subprocess.call('scanimage --buffer-size=40960 --mode Color --resolution 150 --compression None -l 0 -t 0 -x 210 -y 297 > /tmp/' + fn + '.pnm', shell=True)
+		if rc != 0:
+			cad.lcd.set_cursor(0,0)
+			cad.lcd.write('SCAN ERROR'.ljust(15))
+			sleep(3)
+		else:
+			cad.lcd.set_cursor(0,0)
+			cad.lcd.write('Convert + trim'.ljust(15))
+			rc = subprocess.call('convert /tmp/%s.pnm -fuzz 30% -trim /tmp/%s.png' % (fn, fn), shell=True)
+			if rc != 0:
+				cad.lcd.set_cursor(0,0)
+				cad.lcd.write('CONVERT ERROR'.ljust(15))
+				sleep(3)
+			else:
+				copyfile('/tmp/%s.png' % (fn), '/mnt/storage/tmp/Scanner/%s.png' % (fn))
+				cad.lcd.set_cursor(0,0)
+				cad.lcd.write('Complete'.ljust(15))
+				sleep(2)
+		cad.lcd.backlight_off()
 		ignore_buttons = False
 
 
 listener.register(BTN_RIGHT, pifacecad.IODIR_FALLING_EDGE, partial(scroll_status, 1))
 listener.register(BTN_LEFT, pifacecad.IODIR_FALLING_EDGE, partial(scroll_status, -1))
 listener.register(BTN_1, pifacecad.IODIR_FALLING_EDGE, scan_single_a4)
+listener.register(BTN_2, pifacecad.IODIR_FALLING_EDGE, scan_single_a4)
 listener.activate()
 
 while True:
