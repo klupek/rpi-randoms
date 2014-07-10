@@ -23,9 +23,6 @@ FRIENDLY_NAMES = {
 	'hp_LaserJet_3020': 'HP'
 }
 
-def get_scanner_status():
-	return False, "Scanner: idle"
-
 def get_printer_status(name):
 	result = subprocess.check_output(['lpstat', '-l', name]).decode('utf-8')
 	alerts = re.search(r'Alerts: (.+?)\n', result)
@@ -36,7 +33,7 @@ def get_printer_status(name):
 	elif re.search(r'disabled', subprocess.check_output(['lpstat', '-p', name]).decode('utf-8')):
 		return False, fname + ': error(%d)' % ( jobs )
 	elif re.search(r'job-printing', subprocess.check_output(['lpstat', '-l', name]).decode('utf-8')):
-		return False, fname + ': print(%d)' % ( jobs )
+		return True, fname + ': print(%d)' % ( jobs )
 	elif alerts:
 		return True, fname + ":!" + alerts.group(1)
 	elif re.search(r'is idle', subprocess.check_output(['lpstat', '-p', name]).decode('utf-8')):
@@ -65,7 +62,7 @@ def print_status(index, direction, lines, cad):
 	for line in printable:
 		needs_attention, output = line()
 		if needs_attention: 
-			backlight_timer = backlight_timeout
+			backlight_timer = time.time()+backlight_timeout
 			cad.lcd.backlight_on()
 
 		cad.lcd.write(output[0:15].ljust(16) + "\n")
@@ -95,7 +92,7 @@ listener.activate()
 scroll_interval = 5
 scroll_next_refresh = time.time()
 
-lines = [ get_ip, get_scanner_status, partial( get_printer_status, 'hp_LaserJet_3020' ) ]
+lines = [ get_ip, partial( get_printer_status, 'hp_LaserJet_3020' ) ]
 index = -1
 direction = 1
 
@@ -154,9 +151,7 @@ def clear_queue(eq):
 		pass
 
 
-def scan_documents(cad, eq):
-	cad.lcd.backlight_on()
-	
+def scan_documents_impl(cad, eq):
 	fn = strftime('%y%m%d%H%M%S')
 	index = 1
 	keepgoing = True
@@ -179,14 +174,19 @@ def scan_documents(cad, eq):
 			clear_queue(eq)
 		else:
 			index -= 1
+	return index, fn
 
+def scan_documents(cad, eq):
+	cad.lcd.backlight_on()
+	index, fn = scan_documents_impl(cad, eq)
+	
 	for i in range(1, index+1):
 		cad.lcd.clear()
 		cad.lcd.write('Convert %d/%d\n' % (i, index))
 		pagefn = '%s-%d' % (fn, i)
 		cad.lcd.write(pagefn)
 		
-		rc = subprocess.call('convert /tmp/%s.pnm /tmp/%s.png' % (pagefn, pagefn), shell=True)
+		rc = subprocess.call('convert -density 150 /tmp/%s.pnm /tmp/%s.png' % (pagefn, pagefn), shell=True)
 		os.unlink('/tmp/%s.pnm' % (pagefn))
 		if rc != 0:
 			cad.lcd.set_cursor(0,0)
@@ -203,6 +203,39 @@ def scan_documents(cad, eq):
 	sleep(2)
 	cad.lcd.backlight_off()
 	return index
+
+def scan_pdf(cad, eq):
+	cad.lcd.backlight_on()
+	index, fn = scan_documents_impl(cad, eq)
+	
+	for i in range(1, index+1):
+		cad.lcd.clear()
+		cad.lcd.write('Convert %d/%d\n' % (i, index))
+		pagefn = '%s-%d' % (fn, i)
+		cad.lcd.write(pagefn)
+		
+		rc = subprocess.call('convert -quality 85 -density 150 /tmp/%s.pnm /tmp/%s.jpg' % (pagefn, pagefn), shell=True)
+		os.unlink('/tmp/%s.pnm' % (pagefn))
+		if rc != 0:
+			cad.lcd.set_cursor(0,0)
+			cad.lcd.write('CONVERT ERROR'.ljust(15))
+			sleep(3)
+			return
+	
+	cad.lcd.clear()
+	cad.lcd.write('%d pages ->\n' % (index))
+	cad.lcd.write(fn + '.pdf')
+	cmd = "convert " + " ".join(map((lambda x: "/tmp/%s-%d.jpg" % (fn, x)),range(1,index+1))) + ' /mnt/storage/tmp/Scanner/' + fn + '.pdf'
+	rc = subprocess.call(cmd, shell=True)
+	for i in range(1, index+1):
+		pagefn = '/tmp/%s-%d.jpg' % (fn, i)
+		os.unlink(pagefn)
+	
+	cad.lcd.clear()
+	cad.lcd.write('Complete\n')
+	cad.lcd.write('%d documents' % (index))
+	sleep(2)
+	cad.lcd.backlight_off()
 
 def scan_autocrop(cad):
 	cad.lcd.backlight_on()
@@ -255,11 +288,17 @@ while True:
 		elif event == BTN_3:
 			scan_documents(cad, event_queue)
 			clear_queue(event_queue)
+		elif event == BTN_4:
+			scan_pdf(cad, event_queue)
+			clear_queue(event_queue)
 		else:
 			pass
 
 	elif scroll_next_refresh <= time.time():
-		scroll_next_refresh = time.time() + scroll_interval
+		if backlight_timer > time.time():
+			scroll_next_refresh = time.time() + 1
+		else:
+			scroll_next_refresh = time.time() + scroll_interval
 		index += direction
 		if index > len(lines)-2 or index < 0:
 			index -= direction

@@ -1,0 +1,16 @@
+RPi printer and scanner server, status and control.
+Install
+	copy system-up.py and system-status.py to /piface/
+	add to rc.local: /usr/bin/python3 /piface/system-up.py; sleep 10; /usr/bin/python3 /piface/system-status.py 
+
+Usage
+	install cups, setup printer(s), scanner, configure samba, sharing, etc
+	for each printer, add entry to lines[] list in script
+	change /mnt/storage/tmp/Scanner to your location for saving scans.
+	
+Buttons on PiFaceCAD:
+	front, from left to right: scan single a4 page, autocrop, scan multiple (a4) documents, scan multiple (a4) documents to pdf, stop scanning (this is NOT abort, it is used with scan multiple documents)
+	back: joystick left - scroll status up, right - scroll status down
+
+Tested on Raspbian wheezy.
+

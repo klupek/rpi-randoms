@@ -15,5 +15,5 @@ Usage:
 	# optional: make bootlogd init script readonly, even for root and dpkg
 	insserv bootlogd
 	insserv lcd-booting
-
+	add to rc.local: /etc/init.d/lcd-bootlog stop # to kill python script after boot, and release LCD display to status utility
 	
